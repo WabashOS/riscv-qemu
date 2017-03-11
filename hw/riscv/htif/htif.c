@@ -30,6 +30,7 @@
 #include "hw/char/serial.h"
 #include "sysemu/char.h"
 #include "hw/riscv/htif/htif.h"
+#include "hw/riscv/htif/frontend.h"
 #include "qemu/timer.h"
 #include "exec/address-spaces.h"
 #include "qemu/error-report.h"
@@ -40,8 +41,8 @@
 #include "elf_symb.h"
 
 #define ENABLE_CHARDEV
-/*#define DEBUG_CHARDEV */
-/*#define DEBUG_HTIF */
+#define DEBUG_CHARDEV
+#define DEBUG_HTIF
 
 #ifdef ENABLE_CHARDEV
 /*
@@ -151,11 +152,11 @@ static void htif_handle_tohost_write(HTIFState *htifstate, uint64_t val_written)
 
     /*
      * Currently, there is a fixed mapping of devices:
-     * 0: riscv-tests Pass/Fail Reporting Only (no syscall proxy)
+     * 0: riscv-tests Pass/Fail Reporting Only and syscall proxy
      * 1: Console
      */
     if (unlikely(device == 0x0)) {
-        /* frontend syscall handler, only test pass/fail support */
+        /* frontend syscall handler */
         if (cmd == 0x0) {
             #ifdef DEBUG_HTIF
             fprintf(stderr, "frontend syscall handler\n");
@@ -170,7 +171,8 @@ static void htif_handle_tohost_write(HTIFState *htifstate, uint64_t val_written)
                 }
                 exit(payload >> 1);
             }
-            fprintf(stderr, "pk syscall proxy not supported\n");
+            //fprintf(stderr, "pk syscall proxy not supported\n");
+            resp = handle_frontend_syscall(htifstate, payload);
         } else if (cmd == 0xFF) {
             /* use what */
             if (what == 0xFF) {

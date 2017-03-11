@@ -47,6 +47,7 @@ struct HTIFState {
     CPURISCVState *env;
     CharDriverState *chr;
     uint64_t pending_read;
+    char *kernel_cmdline; /* sys_getmainvars */
 };
 
 extern const VMStateDescription vmstate_htif;
