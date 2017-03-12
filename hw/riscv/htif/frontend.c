@@ -36,6 +36,9 @@
 
 #define DEBUG_FRONTEND_RISCV
 
+/* PK's ram starts at 0x80000000, so we have to mask off the msb */
+#define PKADDR_TO_HOST(x) x & 0x7FFFFFFF
+
 /* only supports one fd right now, for the kernel we load */
 int real_kernelfd = -1;
 
@@ -154,7 +157,7 @@ uint64_t sys_getmainvars(HTIFState *htifstate, uint64_t pbuf, uint64_t limit)
     fprintf(stderr, "%s\n", htifstate->kernel_cmdline);
     #endif
 
-    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)pbuf;
+    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)(PKADDR_TO_HOST(pbuf));
 
     /* assume args are bbl + some kernel for now
        later, do the right thing */
@@ -185,14 +188,14 @@ int handle_frontend_syscall(HTIFState *htifstate, uint64_t payload)
     uint64_t mm[8];
     int i;
     /* mask off msb since it is a ram address */
-    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)(payload & 0x7FFFFFFF);
+    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)(PKADDR_TO_HOST(payload));
     for (i = 0; i < 8; i++) {
         mm[i] = ldq_p((void *)(base + i * 8));
     }
 
     #ifdef DEBUG_FRONTEND_RISCV
     for (i = 0; i < 8; i++) {
-        fprintf(stderr, "elem %d, val 0x%016lx\n", i, mm[i]);
+        fprintf(stderr, "elem %d, val 0x%016lx, addr %p\n", i, mm[i], &mm[i]);
     }
     #endif
 

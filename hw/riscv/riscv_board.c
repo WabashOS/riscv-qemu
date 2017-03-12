@@ -232,8 +232,8 @@ static void riscv_spike_board_init(MachineState *args)
     /* add memory mapped htif registers at location specified in the symbol
        table of the elf being loaded (thus kernel_filename is passed to the
        init rather than an address) */
-    htif_mm_init(system_memory, kernel_filename, env->irq[4], boot_rom,
-            env, serial_hds[0]);
+    htif_mm_init(system_memory, kernel_filename, env->irq[4], main_mem,
+            kernel_cmdline, env, serial_hds[0]);
 
     /* timer device at 0x40000000, as specified in the config string above */
     timer_mm_init(system_memory, 0x40000000, env);

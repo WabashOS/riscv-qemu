@@ -56,7 +56,7 @@ extern const MemoryRegionOps htif_io_ops;
 /* legacy pre qom */
 HTIFState *htif_mm_init(MemoryRegion *address_space,
                         const char *kernel_filename, qemu_irq irq,
-                        MemoryRegion *main_mem,
+                        MemoryRegion *main_mem, const char *kernel_cmdline,
                         CPURISCVState *env, CharDriverState *chr);
 
 #endif
