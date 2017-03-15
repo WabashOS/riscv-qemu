@@ -41,8 +41,8 @@
 #include "elf_symb.h"
 
 #define ENABLE_CHARDEV
-#define DEBUG_CHARDEV
-#define DEBUG_HTIF
+/*#define DEBUG_CHARDEV*/
+/*#define DEBUG_HTIF*/
 
 #ifdef ENABLE_CHARDEV
 /*
@@ -146,8 +146,8 @@ static void htif_handle_tohost_write(HTIFState *htifstate, uint64_t val_written)
 
     resp = 0; /* stop gcc complaining */
     #ifdef DEBUG_HTIF
-    fprintf(stderr, "mtohost write:\n-device: %d\n-cmd: %d\n-what: %02lx\n\
-                     -payload: %016lx\n", device, cmd, payload & 0xFF, payload);
+    fprintf(stderr, "mtohost write -device: %d -cmd: %d -what: %lx -payload: %016lx\n",
+        device, cmd, payload & 0xFF, payload);
     #endif
 
     /*

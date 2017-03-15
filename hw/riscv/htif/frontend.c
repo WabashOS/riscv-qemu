@@ -46,8 +46,7 @@ int real_kernelfd = -1;
 
 uint64_t sys_openat(HTIFState *htifstate, uint64_t dirfd, uint64_t pname,
         uint64_t len, uint64_t flags, uint64_t mode) {
-
-    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)pname;
+    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)(PKADDR_TO_HOST(pname));
 
     char name[len];
     int i;
@@ -55,15 +54,14 @@ uint64_t sys_openat(HTIFState *htifstate, uint64_t dirfd, uint64_t pname,
         name[i] = ldub_p((void *)(base + i));
     }
 
+    #ifdef DEBUG_FRONTEND_RISCV
+    fprintf(stderr, "openat: %s dirfd %ld, flags %ld, mode %ld\n", name, dirfd, flags, mode);
+    #endif
+
     /* in case host OS has different val for AT_FDCWD, e.g. OS X
        TODO: removed to fix clang/osx build, sys_openat isn't used anymore
        by bbl anyway
        dirfd = dirfd == BBL_AT_FDCWD ? AT_FDCWD : dirfd; */
-
-    #ifdef DEBUG_FRONTEND_RISCV
-    fprintf(stderr, "openat: %s\n"
-           "dirfd %ld, flags %ld, mode %ld\n", name, dirfd, flags, mode);
-    #endif
 
     real_kernelfd = openat(dirfd, name, flags, mode);
 
@@ -74,13 +72,20 @@ uint64_t sys_openat(HTIFState *htifstate, uint64_t dirfd, uint64_t pname,
     if (real_kernelfd != -1) {
         /* always give fd 3 to bbl, until we have a better tracking mechanism */
         return 3;
+    } else {
+        fprintf(stderr, "error in openat");
+        exit(1);
     }
+
     return -1;
 }
 
 
 uint64_t sys_close(HTIFState *htifstate, uint64_t fd)
 {
+    #ifdef DEBUG_FRONTEND_RISCV
+    fprintf(stderr, "sys_close fd: %ld\n", fd);
+    #endif
     if (fd != 3) {
         fprintf(stderr, "INVALID close fd: %ld. only 3 allowed\n", fd);
         fprintf(stderr, "Did you supply the right kernel using -append?\n");
@@ -100,11 +105,14 @@ uint64_t sys_close(HTIFState *htifstate, uint64_t fd)
 uint64_t sys_write(HTIFState *htifstate, uint64_t fd, uint64_t pbuf,
                    uint64_t len)
 {
+    #ifdef DEBUG_FRONTEND_RISCV
+    fprintf(stderr, "sys_write fd: %ld, len: %ld\n", fd, len);
+    #endif
 
     int i;
     char *printbuf = malloc(sizeof(char) * (len + 1));
     printbuf[len] = '\0'; /* null term for easy printing */
-    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)pbuf;
+    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)(PKADDR_TO_HOST(pbuf));
     for (i = 0; i < len; i++) {
         printbuf[i] = ldub_p((void *)(base + i));
     }
@@ -126,7 +134,7 @@ uint64_t sys_pread(HTIFState *htifstate, uint64_t fd, uint64_t pbuf,
                    uint64_t len, uint64_t off)
 {
     #ifdef DEBUG_FRONTEND_RISCV
-    fprintf(stderr, "read fd: %ld, len: %ld, off: %ld\n", fd, len, off);
+    fprintf(stderr, "sys_pread fd: %ld, len: %ld, off: %ld\n", fd, len, off);
     #endif
     if (fd != 3) {
         fprintf(stderr, "INVALID pread fd: %ld. only 3 allowed\n", fd);
@@ -136,7 +144,7 @@ uint64_t sys_pread(HTIFState *htifstate, uint64_t fd, uint64_t pbuf,
     char *buf = malloc(sizeof(char) * len);
     size_t bytes_read = pread(real_kernelfd, buf, len, off);
 
-    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)pbuf;
+    void *base = htifstate->main_mem_ram_ptr + (uintptr_t)(PKADDR_TO_HOST(pbuf));
     int i;
     for (i = 0; i < bytes_read; i++) {
         stb_p((void *)(base + i), buf[i]);
@@ -154,7 +162,7 @@ uint64_t sys_exit(HTIFState *htifstate, uint64_t code)
 uint64_t sys_getmainvars(HTIFState *htifstate, uint64_t pbuf, uint64_t limit)
 {
     #ifdef DEBUG_FRONTEND_RISCV
-    fprintf(stderr, "%s\n", htifstate->kernel_cmdline);
+    fprintf(stderr, "sys_getmainvars\n");
     #endif
 
     void *base = htifstate->main_mem_ram_ptr + (uintptr_t)(PKADDR_TO_HOST(pbuf));
@@ -193,11 +201,12 @@ int handle_frontend_syscall(HTIFState *htifstate, uint64_t payload)
         mm[i] = ldq_p((void *)(base + i * 8));
     }
 
-    #ifdef DEBUG_FRONTEND_RISCV
+    /*#ifdef DEBUG_FRONTEND_RISCV
+    fprintf(stderr, "syscall: \n");
     for (i = 0; i < 8; i++) {
         fprintf(stderr, "elem %d, val 0x%016lx, addr %p\n", i, mm[i], &mm[i]);
     }
-    #endif
+    #endif*/
 
     uint64_t retval = -1;
     switch (mm[0]) {
