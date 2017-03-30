@@ -160,18 +160,18 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
         } else {
             if (pte & PTE_REMOTE) {
               // this is a remote page
-              rpfh_fetch_page(env, addr, physical, pte_addr, access_type);
+              rpfh_fetch_page(env, addr, physical, &pte);
             } else {
-              /* set accessed and possibly dirty bits.
-                 we only put it in the TLB if it has the right stuff */
-              stq_phys(cs->as, pte_addr, ldq_phys(cs->as, pte_addr) | PTE_A |
-                      ((access_type == MMU_DATA_STORE) * PTE_D));
-
               /* for superpage mappings, make a fake leaf PTE for the TLB's
                  benefit. */
               target_ulong vpn = addr >> PGSHIFT;
               *physical = (ppn | (vpn & ((1L << ptshift) - 1))) << PGSHIFT;
             }
+
+            /* set accessed and possibly dirty bits.
+               we only put it in the TLB if it has the right stuff */
+            stq_phys(cs->as, pte_addr, ldq_phys(cs->as, pte_addr) | PTE_A |
+                    ((access_type == MMU_DATA_STORE) * PTE_D));
 
             /* we do not give all prots indicated by the PTE
              * this is because future accesses need to do things like set the

@@ -33,15 +33,15 @@
 
 static RPFHState *rpfhstate;
 static void *evicted_page;
+static uint64_t evicted_pte;
 static uintptr_t gpfreeframe; // points to guest physical free frame
 
 /* fulfill the fetch page by copying the data in evicted_page to the
   gpfreeframe paddr */
 void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
-    target_ulong pte_addr, int access_type)
+    target_ulong *pte)
 {
     uint32_t asid = env->sptbr >> (TARGET_PHYS_ADDR_SPACE_BITS - PGSHIFT);
-    CPUState *cs = CPU(riscv_env_get_cpu(env));
     printf("rpfh_fetch_page sptbr=%lx asid=%x vaddr=%lx\n", env->sptbr, asid, vaddr);
 
     // compute the host address for gpfreeframe
@@ -50,12 +50,13 @@ void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
     // copy from evicted_page to frame_addr
     memcpy(frame_addr, evicted_page, 4096);
 
-    // update PT
+    // update pte
     *paddr_res = gpfreeframe;
-    target_ulong new_pte = (((*paddr_res >> PGSHIFT) << PTE_PPN_SHIFT) | PTE_A | PTE_V);
+    target_ulong new_pte = 0;
+    new_pte = (*paddr_res >> PGSHIFT) << PTE_PPN_SHIFT;
+    new_pte = new_pte | (evicted_pte & 0xFF); // preserve the pte bits
     printf("new_pte=%lx\n", new_pte);
-    stq_phys(cs->as, pte_addr,
-        new_pte | ((access_type == MMU_DATA_STORE) * PTE_D));
+    *pte = new_pte;
 }
 
 /* guest physical address to host addr */
@@ -67,15 +68,16 @@ inline uintptr_t gpaddr_to_hostaddr(uintptr_t gpaddr, RPFHState *r) {
 static void rpfh_evict_page(rpfh_request *req, RPFHState *r) {
 		printf("qemu rpfh evict page\n");
 		// read pte
-		uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(req->pte_paddr, r);
+    uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(req->pte_paddr, r);
 
-		// set pte as remote
-		*pte = *pte | PTE_REMOTE;
+    // set pte as remote
+    *pte = *pte | PTE_REMOTE;
 
-		// simulate remote memory, save page locally
-		evicted_page = malloc(4096);
-		uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(req->paddr, r);
-		memcpy(evicted_page, frame_addr, 4096);
+    // simulate remote memory, save page locally
+    evicted_page = malloc(4096);
+    uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(req->paddr, r);
+    memcpy(evicted_page, frame_addr, 4096);
+    evicted_pte = *pte;
 }
 
 /* process a new page published to be used by rpfh */

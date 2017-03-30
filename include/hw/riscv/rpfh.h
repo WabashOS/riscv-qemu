@@ -48,7 +48,7 @@ typedef struct rpfh_request {
 } rpfh_request;
 
 void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
-    target_ulong pte_addr, int access_type);
+    target_ulong *pte);
 void rpfh_init_mmio(MemoryRegion *guest_as, MemoryRegion *guest_dram);
 uintptr_t gpaddr_to_hostaddr(uintptr_t gpaddr, RPFHState *r);
 
