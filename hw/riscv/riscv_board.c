@@ -36,6 +36,7 @@
 #include "hw/char/serial.h"
 #include "hw/riscv/htif/htif.h"
 #include "hw/riscv/riscv_rtc.h"
+#include "hw/riscv/rpfh.h"
 #include "hw/boards.h"
 #include "hw/riscv/cpudevs.h"
 #include "sysemu/char.h"
@@ -234,6 +235,8 @@ static void riscv_spike_board_init(MachineState *args)
        init rather than an address) */
     htif_mm_init(system_memory, kernel_filename, env->irq[4], main_mem,
             kernel_cmdline, env, serial_hds[0]);
+
+    rpfh_init_mmio(system_memory, main_mem);
 
     /* timer device at 0x40000000, as specified in the config string above */
     timer_mm_init(system_memory, 0x40000000, env);
