@@ -61,13 +61,13 @@ void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
 
 /* guest physical address to host addr */
 inline uintptr_t gpaddr_to_hostaddr(uintptr_t gpaddr, RPFHState *r) {
-		return (uintptr_t) r->hostptr_guest_dram + (gpaddr & 0x7FFFFFFF);
+    return (uintptr_t) r->hostptr_guest_dram + (gpaddr & 0x7FFFFFFF);
 }
 
 /* evict the page, for now, store it in memory */
 static void rpfh_evict_page(rpfh_request *req, RPFHState *r) {
-		printf("qemu rpfh evict page\n");
-		// read pte
+    printf("qemu rpfh evict page\n");
+    // read pte
     uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(req->pte_paddr, r);
 
     // set pte as remote
@@ -94,15 +94,15 @@ static void rpfh_queues_write(void *opaque, hwaddr mmioaddr,
 
     if (mmioaddr == RPFH_IO_ADDR || mmioaddr == RPFH_IO_ADDR + 4) {
         if (value != 0) {
-						uintptr_t req_addr = gpaddr_to_hostaddr((uintptr_t) value, r);
-						rpfh_request *req = (rpfh_request *) req_addr;
-						printf("req.pte_paddr = %lx, req.pid = %x, req.op = %d\n",
+            uintptr_t req_addr = gpaddr_to_hostaddr((uintptr_t) value, r);
+            rpfh_request *req = (rpfh_request *) req_addr;
+            printf("req.pte_paddr = %lx, req.pid = %x, req.op = %d\n",
                 req->pte_paddr, req->pid, req->op);
 
-						if (req->op == evict) {
-								rpfh_evict_page(req, r);
-						} else if (req->op == freepage) {
-								rpfh_freepage(req, r);
+            if (req->op == evict) {
+                rpfh_evict_page(req, r);
+            } else if (req->op == freepage) {
+                rpfh_freepage(req, r);
             } else {
               printf("rpfh op not implemented\n");
               exit(1);
