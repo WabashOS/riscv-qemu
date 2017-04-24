@@ -29,7 +29,9 @@
 #include "qemu/error-report.h"
 #include <inttypes.h>
 
-#define RPFH_IO_ADDR           0x0
+#define PFA_INT_BASE            0x0
+#define PFA_INT_FREEPAGE        (PFA_INT_BASE)
+#define PFA_INT_EVICTPAGE       (PFA_INT_BASE + 8)
 
 static RPFHState *rpfhstate;
 static void *evicted_page;
@@ -65,25 +67,30 @@ inline uintptr_t gpaddr_to_hostaddr(uintptr_t gpaddr, RPFHState *r) {
 }
 
 /* evict the page, for now, store it in memory */
-static void rpfh_evict_page(rpfh_request *req, RPFHState *r) {
+static void rpfh_evict_page(uint64_t pte_gpaddr, RPFHState *r) {
     printf("qemu rpfh evict page\n");
     // read pte
-    uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(req->pte_paddr, r);
+    uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(pte_gpaddr, r);
+    uint64_t frame_gpaddr = (*pte >> 10) << 12; // the pte's physical address
 
     // set pte as remote
     *pte = *pte | PTE_REMOTE;
 
     // simulate remote memory, save page locally
     evicted_page = malloc(4096);
-    uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(req->paddr, r);
+    uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(frame_gpaddr, r);
     memcpy(evicted_page, frame_addr, 4096);
     evicted_pte = *pte;
 }
 
 /* process a new page published to be used by rpfh */
-static void rpfh_freepage(rpfh_request *req, RPFHState *r) {
-    printf("rpfh_freepage, paddr=%lx\n", req->paddr);
-    gpfreeframe = req->paddr;
+static void rpfh_freepage(uint64_t pte_gpaddr, RPFHState *r) {
+    printf("rpfh_freepage, pte_gpaddr=%lx\n", pte_gpaddr);
+    // the objective is to get the paddr from the pte, and store it
+
+    uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(pte_gpaddr, r);
+    uint64_t frame_gpaddr = (*pte >> 10) << 12;
+    gpfreeframe = frame_gpaddr;
 }
 
 static void rpfh_queues_write(void *opaque, hwaddr mmioaddr,
@@ -92,22 +99,12 @@ static void rpfh_queues_write(void *opaque, hwaddr mmioaddr,
     RPFHState *r = opaque;
     (void) r;
 
-    if (mmioaddr == RPFH_IO_ADDR || mmioaddr == RPFH_IO_ADDR + 4) {
-        if (value != 0) {
-            uintptr_t req_addr = gpaddr_to_hostaddr((uintptr_t) value, r);
-            rpfh_request *req = (rpfh_request *) req_addr;
-            printf("req.pte_paddr = %lx, req.pid = %x, req.op = %d\n",
-                req->pte_paddr, req->pid, req->op);
-
-            if (req->op == evict) {
-                rpfh_evict_page(req, r);
-            } else if (req->op == freepage) {
-                rpfh_freepage(req, r);
-            } else {
-              printf("rpfh op not implemented\n");
-              exit(1);
-            }
-        }
+    if (mmioaddr == PFA_INT_FREEPAGE && value != 0) {
+        rpfh_freepage(value, r);
+    } else if (mmioaddr == PFA_INT_EVICTPAGE && value != 0) {
+        rpfh_evict_page(value, r);
+    } else if (value == 0) {
+        printf("value = 0\n");
     } else {
         printf("not implemented\n");
         exit(1);
@@ -140,6 +137,6 @@ void rpfh_init_mmio(MemoryRegion *guest_as, MemoryRegion *guest_dram)
     r->hostptr_guest_dram = memory_region_get_ram_ptr(guest_dram);
     memory_region_init_io(&r->io, NULL,
                           &rpfh_queue_ops[DEVICE_LITTLE_ENDIAN],
-                          r, "rpfh queues", RPFH_QUEUES_SIZE);
-    memory_region_add_subregion(guest_as, RPFH_QUEUES_ADDR, &r->io);
+                          r, "rpfh queues", RPFH_IO_SIZE);
+    memory_region_add_subregion(guest_as, RPFH_IO_ADDR, &r->io);
 }
