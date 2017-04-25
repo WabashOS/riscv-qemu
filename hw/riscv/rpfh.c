@@ -114,6 +114,15 @@ static void rpfh_queues_write(void *opaque, hwaddr mmioaddr,
 static uint64_t rpfh_queues_read(void *opaque, hwaddr addr, unsigned size)
 {
     printf("read from queue mmio\n");
+    if (addr == PFA_INT_FREEPAGE) {
+        return 0;
+    } else if (addr == PFA_INT_EVICTPAGE) {
+        return 0;
+    } else {
+        printf("not implemented\n");
+        exit(1);
+    }
+
     return 0;
 }
 
