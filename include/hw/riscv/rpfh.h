@@ -28,8 +28,8 @@
 #include "exec/memory.h"
 #include "target-riscv/cpu.h"
 
-#define RPFH_QUEUES_ADDR      0x2000000
-#define RPFH_QUEUES_SIZE      0x1000
+#define RPFH_IO_ADDR      0x2000
+#define RPFH_IO_SIZE      0x1000
 
 typedef struct RPFHState {
     MemoryRegion io;
@@ -38,14 +38,6 @@ typedef struct RPFHState {
 } RPFHState;
 
 typedef enum { evict, freepage } rpfh_op;
-
-typedef struct rpfh_request {
-    uint64_t pte_paddr;
-    uint64_t vaddr;
-    uint64_t paddr;
-    uint32_t pid;
-    rpfh_op op;
-} rpfh_request;
 
 void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
     target_ulong *pte);
