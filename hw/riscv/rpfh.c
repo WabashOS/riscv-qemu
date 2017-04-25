@@ -27,6 +27,7 @@
 #include "target-riscv/cpu.h"
 #include "exec/address-spaces.h"
 #include "qemu/error-report.h"
+#include "qemu/queue.h"
 #include <inttypes.h>
 
 #define PFA_INT_BASE            0x0
@@ -36,29 +37,42 @@
 static RPFHState *rpfhstate;
 static void *evicted_page;
 static uint64_t evicted_pte;
-static uintptr_t gpfreeframe; // points to guest physical free frame
+//static uintptr_t gpfreeframe; // points to guest physical free frame
+
+struct freeframe {
+    uintptr_t ptr;
+    QTAILQ_ENTRY(freeframe) link;
+};
+
+QTAILQ_HEAD(freeframe_head, freeframe) headff;
 
 /* fulfill the fetch page by copying the data in evicted_page to the
-  gpfreeframe paddr */
+  tail ff->ptr paddr */
 void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
     target_ulong *pte)
 {
-    uint32_t asid = env->sptbr >> (TARGET_PHYS_ADDR_SPACE_BITS - PGSHIFT);
-    printf("rpfh_fetch_page sptbr=%lx asid=%x vaddr=%lx\n", env->sptbr, asid, vaddr);
+    printf("rpfh_fetch_page\n");
 
-    // compute the host address for gpfreeframe
-    uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(gpfreeframe, rpfhstate);
+    assert(!QTAILQ_EMPTY(&headff));
+    struct freeframe *ff = QTAILQ_FIRST(&headff);
+    QTAILQ_REMOVE(&headff, ff, link);
+
+    // compute the host address for ff->ptr
+    uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(ff->ptr, rpfhstate);
 
     // copy from evicted_page to frame_addr
     memcpy(frame_addr, evicted_page, 4096);
 
     // update pte
-    *paddr_res = gpfreeframe;
+    *paddr_res = ff->ptr;
     target_ulong new_pte = 0;
     new_pte = (*paddr_res >> PGSHIFT) << PTE_PPN_SHIFT;
-    new_pte = new_pte | (evicted_pte & 0xFF); // preserve the pte bits
+     // preserve the pte bits but remove remote bit
+    new_pte = new_pte | (evicted_pte & 0xFF);
     printf("new_pte=%lx\n", new_pte);
     *pte = new_pte;
+
+    g_free(ff);
 }
 
 /* guest physical address to host addr */
@@ -77,7 +91,7 @@ static void rpfh_evict_page(uint64_t pte_gpaddr, RPFHState *r) {
     *pte = *pte | PTE_REMOTE;
 
     // simulate remote memory, save page locally
-    evicted_page = malloc(4096);
+    evicted_page = g_malloc(4096);
     uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(frame_gpaddr, r);
     memcpy(evicted_page, frame_addr, 4096);
     evicted_pte = *pte;
@@ -90,7 +104,9 @@ static void rpfh_freepage(uint64_t pte_gpaddr, RPFHState *r) {
 
     uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(pte_gpaddr, r);
     uint64_t frame_gpaddr = (*pte >> 10) << 12;
-    gpfreeframe = frame_gpaddr;
+    struct freeframe *ff = malloc(sizeof(struct freeframe));
+    ff->ptr = frame_gpaddr;
+    QTAILQ_INSERT_TAIL(&headff, ff, link);
 }
 
 static void rpfh_queues_write(void *opaque, hwaddr mmioaddr,
@@ -148,4 +164,6 @@ void rpfh_init_mmio(MemoryRegion *guest_as, MemoryRegion *guest_dram)
                           &rpfh_queue_ops[DEVICE_LITTLE_ENDIAN],
                           r, "rpfh queues", RPFH_IO_SIZE);
     memory_region_add_subregion(guest_as, RPFH_IO_ADDR, &r->io);
+
+    QTAILQ_INIT(&headff);
 }
