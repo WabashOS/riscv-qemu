@@ -33,6 +33,7 @@
 #define PFA_INT_BASE            0x0
 #define PFA_INT_FREEPAGE        (PFA_INT_BASE)
 #define PFA_INT_EVICTPAGE       (PFA_INT_BASE + 8)
+#define PFA_INT_NEWFRAME        (PFA_INT_BASE + 16)
 
 static RPFHState *rpfhstate;
 
@@ -47,8 +48,14 @@ struct evictedframe {
     QTAILQ_ENTRY(evictedframe) link;
 };
 
+struct newframe {
+    uint64_t pte;
+    QTAILQ_ENTRY(newframe) link;
+};
+
 QTAILQ_HEAD(freeframe_head, freeframe) headff;
 QTAILQ_HEAD(evictedframe_head, evictedframe) headef;
+QTAILQ_HEAD(newframe_head, newframe) headnf;
 
 /* guest physical address to host addr */
 inline uintptr_t gpaddr_to_hostaddr(uintptr_t gpaddr, RPFHState *r) {
@@ -96,6 +103,11 @@ void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
     printf("new_pte=%lx\n", new_pte);
     *pte = new_pte;
 
+    // finally, add the new pte to the newframe queue
+    struct newframe *nf = g_malloc(sizeof(struct newframe));
+    nf->pte = new_pte;
+    QTAILQ_INSERT_TAIL(&headnf, nf, link);
+
     g_free(ff);
     g_free(ef->data);
     g_free(ef);
@@ -140,15 +152,17 @@ static void rpfh_queues_write(void *opaque, hwaddr mmioaddr,
     RPFHState *r = opaque;
     (void) r;
 
-    if (mmioaddr == PFA_INT_FREEPAGE && value != 0) {
+    if (value == 0) {
+        printf("wrote 0 to pfa mmio region\n");
+        return;
+    }
+
+    if (mmioaddr == PFA_INT_FREEPAGE) {
         rpfh_freepage(value, r);
-    } else if (mmioaddr == PFA_INT_EVICTPAGE && value != 0) {
+    } else if (mmioaddr == PFA_INT_EVICTPAGE) {
         rpfh_evict_page(value, r);
-    } else if (value == 0) {
-        printf("value = 0\n");
     } else {
-        printf("not implemented\n");
-        exit(1);
+        printf("wrote to an invalid pfa register\n");
     }
 }
 
@@ -167,9 +181,20 @@ static uint64_t rpfh_queues_read(void *opaque, hwaddr addr, unsigned size)
         QTAILQ_FOREACH(ef, &headef, link) {
             count++;
         }
+    } else if (addr == PFA_INT_NEWFRAME) {
+        if(QTAILQ_EMPTY(&headnf)) {
+            return 0;
+        }
+
+        // get pte of newframe's head, remove from queue and free before
+        // returning
+        struct newframe *nf = QTAILQ_FIRST(&headnf);
+        uint64_t ptenf = nf->pte;
+        QTAILQ_REMOVE(&headnf, nf, link);
+        g_free(nf);
+        return ptenf;
     } else {
-        printf("not implemented\n");
-        exit(1);
+        printf("read from invalid pfa register\n");
     }
 
     return count;
@@ -200,4 +225,5 @@ void rpfh_init_mmio(MemoryRegion *guest_as, MemoryRegion *guest_dram)
 
     QTAILQ_INIT(&headff);
     QTAILQ_INIT(&headef);
+    QTAILQ_INIT(&headnf);
 }
