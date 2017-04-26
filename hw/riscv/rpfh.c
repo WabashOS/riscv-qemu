@@ -170,7 +170,6 @@ static uint64_t rpfh_queues_read(void *opaque, hwaddr addr, unsigned size)
 {
     printf("read from queue mmio\n");
     unsigned int count = 0;
-    struct evictedframe *ef = NULL;
     struct freeframe *ff = NULL;
 
     if (addr == PFA_INT_FREEPAGE) {
@@ -178,9 +177,9 @@ static uint64_t rpfh_queues_read(void *opaque, hwaddr addr, unsigned size)
             count++;
         }
     } else if (addr == PFA_INT_EVICTPAGE) {
-        QTAILQ_FOREACH(ef, &headef, link) {
-            count++;
-        }
+        // this is always 0 because in qemu pages are "evicted"
+        // instantaneously
+        return 0;
     } else if (addr == PFA_INT_NEWFRAME) {
         if(QTAILQ_EMPTY(&headnf)) {
             return 0;
