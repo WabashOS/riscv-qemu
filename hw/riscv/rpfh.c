@@ -35,50 +35,72 @@
 #define PFA_INT_EVICTPAGE       (PFA_INT_BASE + 8)
 
 static RPFHState *rpfhstate;
-static void *evicted_page;
-static uint64_t evicted_pte;
-//static uintptr_t gpfreeframe; // points to guest physical free frame
 
 struct freeframe {
-    uintptr_t ptr;
+    uintptr_t gptr;
     QTAILQ_ENTRY(freeframe) link;
 };
 
+struct evictedframe {
+    void *data;
+    uint64_t pte;
+    QTAILQ_ENTRY(evictedframe) link;
+};
+
 QTAILQ_HEAD(freeframe_head, freeframe) headff;
-
-/* fulfill the fetch page by copying the data in evicted_page to the
-  tail ff->ptr paddr */
-void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
-    target_ulong *pte)
-{
-    printf("rpfh_fetch_page\n");
-
-    assert(!QTAILQ_EMPTY(&headff));
-    struct freeframe *ff = QTAILQ_FIRST(&headff);
-    QTAILQ_REMOVE(&headff, ff, link);
-
-    // compute the host address for ff->ptr
-    uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(ff->ptr, rpfhstate);
-
-    // copy from evicted_page to frame_addr
-    memcpy(frame_addr, evicted_page, 4096);
-
-    // update pte
-    *paddr_res = ff->ptr;
-    target_ulong new_pte = 0;
-    new_pte = (*paddr_res >> PGSHIFT) << PTE_PPN_SHIFT;
-     // preserve the pte bits but remove remote bit
-    new_pte = new_pte | (evicted_pte & 0xFF);
-    printf("new_pte=%lx\n", new_pte);
-    *pte = new_pte;
-
-    g_free(ff);
-}
+QTAILQ_HEAD(evictedframe_head, evictedframe) headef;
 
 /* guest physical address to host addr */
 inline uintptr_t gpaddr_to_hostaddr(uintptr_t gpaddr, RPFHState *r) {
     return (uintptr_t) r->hostptr_guest_dram + (gpaddr & 0x7FFFFFFF);
 }
+
+/* fulfill the fetch page by copying the data in evicted_page to the
+  tail ff->gptr paddr */
+void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
+    target_ulong *pte)
+{
+    printf("rpfh_fetch_page\n");
+
+    // get a freeframe
+    assert(!QTAILQ_EMPTY(&headff));
+    struct freeframe *ff = QTAILQ_FIRST(&headff);
+    QTAILQ_REMOVE(&headff, ff, link);
+
+    // we need to find the evictedframe that corresponds to the vaddr
+    // that caused the remote page fault. to do so, we use the vaddr's pte to get the ppn.
+    // then, we compare with the evictedframes' ppns until we find a match
+    struct evictedframe *ef = NULL;
+    uint64_t key_pte = *pte;
+    bool found = false;
+    QTAILQ_FOREACH(ef, &headef, link) {
+        if ((key_pte & 0xFFFFFFFFFC00) == (ef->pte & 0xFFFFFFFFFC00)) {
+            found = true;
+            break;
+        }
+    }
+    assert(found);
+    QTAILQ_REMOVE(&headef, ef, link);
+
+    // compute the host address for ff->gptr
+    uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(ff->gptr, rpfhstate);
+
+    // copy from evictedpage to frame_addr
+    memcpy(frame_addr, ef->data, 4096);
+    *paddr_res = ff->gptr;
+
+    // update pte, preserve the pte bits but remove remote bit
+    target_ulong new_pte = 0;
+    new_pte = (*paddr_res >> PGSHIFT) << PTE_PPN_SHIFT;
+    new_pte = new_pte | (ef->pte & 0xFF);
+    printf("new_pte=%lx\n", new_pte);
+    *pte = new_pte;
+
+    g_free(ff);
+    g_free(ef->data);
+    g_free(ef);
+}
+
 
 /* evict the page, for now, store it in memory */
 static void rpfh_evict_page(uint64_t pte_gpaddr, RPFHState *r) {
@@ -91,10 +113,13 @@ static void rpfh_evict_page(uint64_t pte_gpaddr, RPFHState *r) {
     *pte = *pte | PTE_REMOTE;
 
     // simulate remote memory, save page locally
-    evicted_page = g_malloc(4096);
+    struct evictedframe *ef = g_malloc(sizeof(struct evictedframe));
+    ef->data = g_malloc(4096);
+
     uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(frame_gpaddr, r);
-    memcpy(evicted_page, frame_addr, 4096);
-    evicted_pte = *pte;
+    memcpy(ef->data, frame_addr, 4096);
+    ef->pte = *pte;
+    QTAILQ_INSERT_TAIL(&headef, ef, link);
 }
 
 /* process a new page published to be used by rpfh */
@@ -104,8 +129,8 @@ static void rpfh_freepage(uint64_t pte_gpaddr, RPFHState *r) {
 
     uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(pte_gpaddr, r);
     uint64_t frame_gpaddr = (*pte >> 10) << 12;
-    struct freeframe *ff = malloc(sizeof(struct freeframe));
-    ff->ptr = frame_gpaddr;
+    struct freeframe *ff = g_malloc(sizeof(struct freeframe));
+    ff->gptr = frame_gpaddr;
     QTAILQ_INSERT_TAIL(&headff, ff, link);
 }
 
@@ -166,4 +191,5 @@ void rpfh_init_mmio(MemoryRegion *guest_as, MemoryRegion *guest_dram)
     memory_region_add_subregion(guest_as, RPFH_IO_ADDR, &r->io);
 
     QTAILQ_INIT(&headff);
+    QTAILQ_INIT(&headef);
 }

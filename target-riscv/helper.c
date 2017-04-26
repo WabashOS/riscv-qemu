@@ -162,6 +162,7 @@ static int get_physical_address(CPURISCVState *env, hwaddr *physical,
               // this is a remote page
               rpfh_fetch_page(env, addr, physical, &pte);
               stq_phys(cs->as, pte_addr, pte);
+              pte = ldq_phys(cs->as, pte_addr);
             } else {
               /* for superpage mappings, make a fake leaf PTE for the TLB's
                  benefit. */
