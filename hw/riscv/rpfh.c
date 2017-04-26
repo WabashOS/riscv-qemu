@@ -62,31 +62,31 @@ inline uintptr_t gpaddr_to_hostaddr(uintptr_t gpaddr, RPFHState *r) {
     return (uintptr_t) r->hostptr_guest_dram + (gpaddr & 0x7FFFFFFF);
 }
 
-/* fulfill the fetch page by copying the data in evicted_page to the
-  tail ff->gptr paddr */
+/* fulfill the fetch request by using the copied page in its evictedframe entry */
 void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
     target_ulong *pte)
 {
     printf("rpfh_fetch_page\n");
 
-    // get a freeframe
+    // get a freeframe to fulfill the fetch request
     assert(!QTAILQ_EMPTY(&headff));
     struct freeframe *ff = QTAILQ_FIRST(&headff);
     QTAILQ_REMOVE(&headff, ff, link);
 
-    // we need to find the evictedframe that corresponds to the vaddr
-    // that caused the remote page fault. to do so, we use the vaddr's pte to get the ppn.
-    // then, we compare with the evictedframes' ppns until we find a match
+    // we need to find the evictedframe that corresponds to the vaddr that just
+    // caused the remote page fault. to do so, we use the vaddr's pte to get
+    // the ppn.  then, we compare with the evictedframes' ppns until we find a
+    // match
     struct evictedframe *ef = NULL;
-    uint64_t key_pte = *pte;
+    uint64_t key_pte = *pte & 0xFFFFFFFFFC00;
     bool found = false;
     QTAILQ_FOREACH(ef, &headef, link) {
-        if ((key_pte & 0xFFFFFFFFFC00) == (ef->pte & 0xFFFFFFFFFC00)) {
+        if (key_pte == (ef->pte & 0xFFFFFFFFFC00)) {
             found = true;
             break;
         }
     }
-    assert(found);
+    assert(found); // by construction, we should find it
     QTAILQ_REMOVE(&headef, ef, link);
 
     // compute the host address for ff->gptr
@@ -114,7 +114,7 @@ void rpfh_fetch_page(CPURISCVState *env, target_ulong vaddr, hwaddr *paddr_res,
 }
 
 
-/* evict the page, for now, store it in memory */
+/* evict the page, store it in an evictedframe entry */
 static void rpfh_evict_page(uint64_t pte_gpaddr, RPFHState *r) {
     printf("qemu rpfh evict page\n");
     // read pte
@@ -137,8 +137,8 @@ static void rpfh_evict_page(uint64_t pte_gpaddr, RPFHState *r) {
 /* process a new page published to be used by rpfh */
 static void rpfh_freepage(uint64_t pte_gpaddr, RPFHState *r) {
     printf("rpfh_freepage, pte_gpaddr=%lx\n", pte_gpaddr);
-    // the objective is to get the paddr from the pte, and store it
 
+    // get the paddr from the pte, and store it in a freeframe
     uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(pte_gpaddr, r);
     uint64_t frame_gpaddr = (*pte >> 10) << 12;
     struct freeframe *ff = g_malloc(sizeof(struct freeframe));
@@ -200,8 +200,6 @@ static uint64_t rpfh_queues_read(void *opaque, hwaddr addr, unsigned size)
     return count;
 }
 
-// OS writes free pages rpfh can use,
-// OS reads new pages brought in by rpfh
 static const MemoryRegionOps rpfh_queue_ops[3] = {
     [DEVICE_LITTLE_ENDIAN] = {
         .read = rpfh_queues_read,
