@@ -155,16 +155,24 @@ static void rpfh_queues_write(void *opaque, hwaddr mmioaddr,
 static uint64_t rpfh_queues_read(void *opaque, hwaddr addr, unsigned size)
 {
     printf("read from queue mmio\n");
+    unsigned int count = 0;
+    struct evictedframe *ef = NULL;
+    struct freeframe *ff = NULL;
+
     if (addr == PFA_INT_FREEPAGE) {
-        return 0;
+        QTAILQ_FOREACH(ff, &headff, link) {
+            count++;
+        }
     } else if (addr == PFA_INT_EVICTPAGE) {
-        return 0;
+        QTAILQ_FOREACH(ef, &headef, link) {
+            count++;
+        }
     } else {
         printf("not implemented\n");
         exit(1);
     }
 
-    return 0;
+    return count;
 }
 
 // OS writes free pages rpfh can use,
