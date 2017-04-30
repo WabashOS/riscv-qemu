@@ -57,6 +57,11 @@ QTAILQ_HEAD(freeframe_head, freeframe) headff;
 QTAILQ_HEAD(evictedframe_head, evictedframe) headef;
 QTAILQ_HEAD(newframe_head, newframe) headnf;
 
+/* Get the physical address of the page frame pointed to by pte */
+static inline uintptr_t pte_frame(uint64_t *pte) {
+  return (((*pte & ~PTE_REMOTE) >> PTE_PPN_SHIFT) << 12);
+}
+
 /* guest physical address to host addr */
 inline uintptr_t gpaddr_to_hostaddr(uintptr_t gpaddr, RPFHState *r) {
     return (uintptr_t) r->hostptr_guest_dram + (gpaddr & 0x7FFFFFFF);
@@ -120,12 +125,13 @@ static void rpfh_evict_page(uint64_t pte_gpaddr, RPFHState *r) {
     // read pte
     uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(pte_gpaddr, r);
 
-    if ((*pte & ((uint64_t) 1 << 48)) != 0) {
+    if ((*pte & PTE_REMOTE) != 0) {
       printf("This pte is already remote\n");
       return;
     }
 
-    uint64_t frame_gpaddr = (*pte >> 10) << 12; // the pte's physical address
+    /* physical address of the frame */
+    uint64_t frame_gpaddr = pte_frame(pte);
 
     // set pte as remote
     *pte = *pte | PTE_REMOTE;
@@ -136,6 +142,9 @@ static void rpfh_evict_page(uint64_t pte_gpaddr, RPFHState *r) {
 
     uint64_t *frame_addr = (uint64_t *) gpaddr_to_hostaddr(frame_gpaddr, r);
     memcpy(ef->data, frame_addr, 4096);
+    /* To be extra careful, we zero out the frame here.
+     * This is mostly to help catch bugs. */
+    memset(frame_addr, 0, 4096);
     ef->pte = *pte;
     QTAILQ_INSERT_TAIL(&headef, ef, link);
 }
@@ -146,7 +155,7 @@ static void rpfh_freepage(uint64_t pte_gpaddr, RPFHState *r) {
 
     // get the paddr from the pte, and store it in a freeframe
     uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(pte_gpaddr, r);
-    uint64_t frame_gpaddr = (*pte & 0xFFFFFFFFFC00) << 12;
+    uint64_t frame_gpaddr = pte_frame(pte);
     struct freeframe *ff = g_malloc(sizeof(struct freeframe));
     ff->gptr = frame_gpaddr;
     QTAILQ_INSERT_TAIL(&headff, ff, link);
