@@ -119,6 +119,12 @@ static void rpfh_evict_page(uint64_t pte_gpaddr, RPFHState *r) {
     printf("qemu rpfh evict page\n");
     // read pte
     uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(pte_gpaddr, r);
+
+    if ((*pte & ((uint64_t) 1 << 48)) != 0) {
+      printf("This pte is already remote\n");
+      return;
+    }
+
     uint64_t frame_gpaddr = (*pte >> 10) << 12; // the pte's physical address
 
     // set pte as remote
@@ -140,7 +146,7 @@ static void rpfh_freepage(uint64_t pte_gpaddr, RPFHState *r) {
 
     // get the paddr from the pte, and store it in a freeframe
     uint64_t *pte = (uint64_t *) gpaddr_to_hostaddr(pte_gpaddr, r);
-    uint64_t frame_gpaddr = (*pte >> 10) << 12;
+    uint64_t frame_gpaddr = (*pte & 0xFFFFFFFFFC00) << 12;
     struct freeframe *ff = g_malloc(sizeof(struct freeframe));
     ff->gptr = frame_gpaddr;
     QTAILQ_INSERT_TAIL(&headff, ff, link);
